@@ -5,13 +5,25 @@
 #include <OneWire.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <AutoPID.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
-#define ONE_WIRE_BUS 12    //Sensors Pins
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+
+#define ONE_WIRE_BUS 12    //Sensors Pins
+#define STEP_PIN 8
+#define DIR_PIN 7
+#define POT_PIN 2
+#define FAN_PIN 10
+
+#define OUTPUT_MIN 100
+#define OUTPUT_MAX 6400
+#define KP 1200
+#define KI 30
+#define KD 50
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -25,89 +37,58 @@ byte addr[N_Sensors][8] = {                                   //Temperature sens
 };
 
 float temps[N_Sensors];
-float meanTemp;
-float minTemps[N_Sensors];
-float maxTemps[N_Sensors];
-float meanHeat;
-bool heatingStatus;
+
+double temperature, outputVal;
+double setPoint = 30;
+AutoPID myPID(&temperature, &setPoint, &outputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
 
 OneWire  ds(ONE_WIRE_BUS);  ////////////// on pin 2 (a 4.7K resistor is necessary)
 ////////////////////////////////////////Temperature Sensors configuration
-//int motorPin = 11;
-int fanPin = 10;
-int potPin = 2;
-int dirPin = 7;
-int stepPin = 8;
 
 long period = 2000;
 long onTime = 50;
 
+long lastTime = 100;
+float fanOutput = 255;
+
 void setup() {
 
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
-    Serial.println(F("SSD1306 allocation failed"));
-    for (;;); // Don't proceed, loop forever
-  }
+  startDisplay();
 
-  //displayLogo();
   Serial.begin(9600);
-  pinMode(stepPin, OUTPUT);
-  pinMode(dirPin, OUTPUT);
-  pinMode(fanPin, OUTPUT);
-  digitalWrite(fanPin, HIGH);
-  digitalWrite(dirPin, HIGH);
+  pinMode(STEP_PIN, OUTPUT);
+  pinMode(DIR_PIN, OUTPUT);
+  pinMode(FAN_PIN, OUTPUT);
+  digitalWrite(FAN_PIN, HIGH);
+  digitalWrite(DIR_PIN, HIGH);
   askTemperatures();
   delay(1000);
+  myPID.setBangBang(4);
+  myPID.setTimeStep(1000);
 }
-
-long lastTime = 100;
-float pumpOutput = 0;
-float fanOutput = 255;
-float lowestTemperature = -6;
-float setTemperature = -4;
-float diff;
-int potVal;
-long lastDrop;
 
 void loop()
 {
-  potVal = analogRead(potPin);
-  pumpOutput = potVal * 4;
-  if (potVal != 0)
-    tone(stepPin, pumpOutput);
+  int potVal = analogRead(POT_PIN);
+  if (potVal != 0) {
+    outputVal = map(potVal,0,1023,0,OUTPUT_MAX);
+    tone(STEP_PIN, outputVal);
+  }
 
   if (millis() - lastTime > 1000) {
     lastTime = millis();
     getTemperatures();
+    temperature = temps[2];
+    if (potVal == 0) {
+      myPID.run();
+    }
+    tone(STEP_PIN, outputVal);
     askTemperatures();
-    calculateOutput();
-    //    setTemperature = max(lowestTemperature, temps[1] );
-    //    setTemperature = min(setTemperature, 0);
-    //setTemperature = lowestTemperature;
+
     refreshDisplay();
   }
 }
 
-void calculateOutput() {
-  diff = temps[0] - setTemperature;
-  if (potVal == 0)
-    pumpOutput = clip(diff);
-}
-
-int clip(float diff) {
-  //0 to 1 -> 255,80
-  float inMax = 0.5;
-  float inMin = 0;
-
-  float outMax = 100;
-  float outMin = 80;
-
-  if (diff > inMax) return 0;
-  if (diff < inMin) return outMax;
-  float pumpOutput = outMax - diff / (inMax - inMin) * (outMax - outMin);
-  return pumpOutput;
-}
 
 void askTemperatures() {
   /////////////Ask for temperatures
@@ -152,9 +133,9 @@ void refreshSerial() {
   //  Serial.print("\tOutside Temp: ");
   //  Serial.print(temps[1]);
   Serial.print("\tSet Temp: ");
-  Serial.print(setTemperature);
+  Serial.print(setPoint);
   Serial.print("\tPump Ouput: ");
-  Serial.print(pumpOutput);
+  Serial.print(outputVal);
   //  Serial.print("\tOutput: ");
   //  Serial.print(pumpOutput/255);
   //Serial.print("\tPot: ");
@@ -162,31 +143,31 @@ void refreshSerial() {
   Serial.println();
 }
 
-void refreshOLED() {
-  display.setTextSize(1);      // Normal 1:1 pixel scale
-  display.setTextColor(WHITE); // Draw white text
-  display.cp437(true);         // Use full 256 char 'Code Page 437' font
-
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.print("ST=");
-  display.println(setTemperature);
-  display.print("T0=");
-  display.println(temps[0]);
-  display.print("T1=");
-  display.println(temps[1]);
-  display.print("T2=");
-  display.println(temps[2]);
-
-  display.setCursor(64, 8);
-  display.print("pO=");
-  display.print(pumpOutput / 255);
-  display.setCursor(64, 16);
-  display.print("fO=");
-  display.print(fanOutput / 255);
-
-  display.display();
-}
+//void refreshOLED() {
+//  display.setTextSize(1);      // Normal 1:1 pixel scale
+//  display.setTextColor(WHITE); // Draw white text
+//  display.cp437(true);         // Use full 256 char 'Code Page 437' font
+//
+//  display.clearDisplay();
+//  display.setCursor(0, 0);
+//  display.print("ST=");
+//  display.println(setPoint);
+//  display.print("T0=");
+//  display.println(temps[0]);
+//  display.print("T1=");
+//  display.println(temps[1]);
+//  display.print("T2=");
+//  display.println(temps[2]);
+//
+//  display.setCursor(64, 8);
+//  display.print("pO=");
+//  display.print(pumpOutput / 255);
+//  display.setCursor(64, 16);
+//  display.print("fO=");
+//  display.print(fanOutput / 255);
+//
+//  display.display();
+//}
 
 void refreshAlterOLED() {
   display.setTextSize(4);      // Normal 1:1 pixel scale
@@ -198,9 +179,6 @@ void refreshAlterOLED() {
   display.print(temps[0]);
   display.display();
 }
-
-
-
 
 void displayLogo(void) {
   display.clearDisplay();
@@ -215,4 +193,13 @@ void displayLogo(void) {
 
   display.display();
   delay(2000);
+}
+
+void startDisplay() {
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;); // Don't proceed, loop forever
+  }
+  //displayLogo();
 }
