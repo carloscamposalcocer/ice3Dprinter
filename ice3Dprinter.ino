@@ -19,11 +19,11 @@
 #define POT_PIN 2
 #define FAN_PIN 10
 
-#define OUTPUT_MIN 100
-#define OUTPUT_MAX 6400
+#define OUTPUT_MIN 300
+#define OUTPUT_MAX 12000
 #define KP 1200
-#define KI 30
-#define KD 50
+#define KI 7
+#define KD 200000
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -39,7 +39,7 @@ byte addr[N_Sensors][8] = {                                   //Temperature sens
 float temps[N_Sensors];
 
 double temperature, outputVal;
-double setPoint = 30;
+double setPoint = 5;
 AutoPID myPID(&temperature, &setPoint, &outputVal, OUTPUT_MIN, OUTPUT_MAX, KP, KI, KD);
 
 OneWire  ds(ONE_WIRE_BUS);  ////////////// on pin 2 (a 4.7K resistor is necessary)
@@ -63,7 +63,7 @@ void setup() {
   digitalWrite(DIR_PIN, HIGH);
   askTemperatures();
   delay(1000);
-  myPID.setBangBang(4);
+  //myPID.setBangBang(4);
   myPID.setTimeStep(1000);
 }
 
@@ -71,17 +71,17 @@ void loop()
 {
   int potVal = analogRead(POT_PIN);
   if (potVal != 0) {
-    outputVal = map(potVal,0,1023,0,OUTPUT_MAX);
-    tone(STEP_PIN, outputVal);
+    //    outputVal = map(potVal,0,1023,0,OUTPUT_MAX);
+    //    tone(STEP_PIN, outputVal);
+    potVal = map(potVal, 0, 1023, -6, 6);
+    setPoint = potVal;
   }
 
   if (millis() - lastTime > 1000) {
     lastTime = millis();
     getTemperatures();
     temperature = temps[2];
-    if (potVal == 0) {
-      myPID.run();
-    }
+    myPID.run();
     tone(STEP_PIN, outputVal);
     askTemperatures();
 
@@ -128,19 +128,12 @@ void refreshDisplay() {
 }
 
 void refreshSerial() {
-  Serial.print("Nozzel Temp: ");
   Serial.print(temps[2]);
-  //  Serial.print("\tOutside Temp: ");
-  //  Serial.print(temps[1]);
-  Serial.print("\tSet Temp: ");
+  Serial.print(" ");
   Serial.print(setPoint);
-  Serial.print("\tPump Ouput: ");
-  Serial.print(outputVal);
-  //  Serial.print("\tOutput: ");
-  //  Serial.print(pumpOutput/255);
-  //Serial.print("\tPot: ");
-  //Serial.print(potVal);
-  Serial.println();
+  Serial.print(" ");
+  Serial.print(outputVal / 1000);
+  Serial.print("\n");
 }
 
 //void refreshOLED() {
